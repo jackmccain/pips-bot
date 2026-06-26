@@ -50,6 +50,11 @@ async function redis(cmd) {
   return (await r.json()).result;
 }
 
+// IMPORTANT: this test causes the live bot to write a throwaway score into the
+// real Redis key. Back it up first and restore it afterwards so we never touch
+// real user data (lesson learned the hard way).
+const backup = await redis(['GET', 'pips-bot:db']);
+
 await post('valid signature   ', undefined);
 await post('tampered signature ', 'v1,AAAAbadAAAA=');
 
@@ -57,9 +62,14 @@ await post('tampered signature ', 'v1,AAAAbadAAAA=');
 await new Promise((res) => setTimeout(res, 4000));
 
 const raw = await redis(['GET', 'pips-bot:db']);
-console.log('\nRedis pips-bot:db after test:', raw || '(empty)');
 const stored = raw ? JSON.parse(raw) : { scores: [] };
 const ok = stored.scores?.some((s) => s.puzzle === 1 && s.difficulty === 'Easy' && s.seconds === 30);
 console.log(ok ? '✅ Score was written to Redis by the deployed bot.' : '❌ Score NOT found in Redis.');
 
-console.log('Cleanup DEL pips-bot:db ->', JSON.stringify(await redis(['DEL', 'pips-bot:db'])));
+// Restore exactly what was there before the test (removes the throwaway score).
+if (backup == null) {
+  await redis(['DEL', 'pips-bot:db']);
+} else {
+  await redis(['SET', 'pips-bot:db', backup]);
+}
+console.log('Restored pips-bot:db to its pre-test state.');
