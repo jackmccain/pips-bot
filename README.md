@@ -29,7 +29,7 @@ Bot → Thanks Jack! Pips #3
 | `BOARD`     | today's standings                 |
 | `ME`        | your scores                       |
 | `NAME Jack` | set your display name             |
-| `HELP`      | list commands                     |
+| `INIT`      | list commands                     |
 
 ## Setup
 

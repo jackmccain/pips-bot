@@ -18,7 +18,7 @@ const HELP = [
   '• BOARD — today\'s standings',
   '• ME — your scores',
   '• NAME <your name> — set how you show up',
-  '• HELP — this message',
+  '• INIT — this message',
 ].join('\n');
 
 /**
@@ -40,7 +40,8 @@ export async function handleMessage(phone, text) {
   const arg = rest.join(' ').trim();
 
   switch (cmd) {
-    case 'help':
+    case 'init':
+    case 'help': // kept as a silent fallback — people reflexively text HELP
     case 'commands':
     case '?':
       return HELP;
@@ -63,7 +64,7 @@ export async function handleMessage(phone, text) {
       return `Got it — you'll show up as "${clampName(arg)}".`;
 
     default:
-      return `Didn't catch that. Send your Pips results to log them, or text HELP for commands.`;
+      return `Didn't catch that. Send your Pips results to log them, or text INIT for commands.`;
   }
 }
 
