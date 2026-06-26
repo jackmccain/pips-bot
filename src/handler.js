@@ -92,25 +92,22 @@ export async function handleMessage(phone, text) {
     case 'leaderboard':
     case 'standings':
     case 'scores':
-      return renderBoard(parseFilters(rest, true));
+      return renderBoard(parseFilters(rest));
 
     case 'data':
-      if (!isOwner(phone)) return ADMIN_ONLY;
+      if (!isOwner(phone)) return null; // stay silent for non-admins
       if (!arg) return 'Usage: DATA <name>';
       return renderData(arg);
 
     case 'clear':
-      if (!isOwner(phone)) return ADMIN_ONLY;
+      if (!isOwner(phone)) return null; // stay silent for non-admins
       if (!arg) return 'Usage: CLEAR <id> | CLEAR <name> | CLEAR ALL';
       return handleClear(arg, rest);
   }
 
-  // 3) Bare board shortcuts: "WEEK", "EASY", "HARD ALLTIME", "TODAY"...
-  const q = parseFilters(words, false);
-  if (q) return renderBoard(q);
-
-  // 4) Fallback.
-  return "Didn't catch that. Send your Pips results to log them, or text INIT for commands.";
+  // 3) Not a score and not a known command → stay silent.
+  //    The bot only replies to its own commands, never to ordinary chatter.
+  return null;
 }
 
 async function handleScores(phone, scores) {
@@ -144,26 +141,17 @@ async function handleScores(phone, scores) {
 }
 
 /**
- * Parse difficulty/window filter words.
+ * Parse BOARD difficulty/window filter words (unknown words are ignored).
  * @param {string[]} words
- * @param {boolean} lenient  if true (explicit BOARD cmd), ignore unknown words;
- *                           if false (bare shortcut), return null on any unknown.
- * @returns {{difficulty:string|null, window:string}|null}
+ * @returns {{difficulty:string|null, window:string}}
  */
-function parseFilters(words, lenient) {
+function parseFilters(words) {
   let difficulty = null;
   let window = null;
-  let unknown = false;
-
   for (const w of words) {
     const lw = w.toLowerCase();
     if (DIFF_WORDS[lw]) difficulty = DIFF_WORDS[lw];
     else if (WINDOW_WORDS[lw]) window = WINDOW_WORDS[lw];
-    else unknown = true;
-  }
-
-  if (!lenient) {
-    if (words.length === 0 || unknown) return null;
   }
   return { difficulty, window: window || 'today' };
 }
@@ -214,8 +202,6 @@ function randomWarQuote() {
 }
 
 // ---- Admin: DATA / CLEAR ----
-
-const ADMIN_ONLY = "That's an admin-only command.";
 
 function normalizePhone(p) {
   return String(p || '').replace(/\D/g, '');
