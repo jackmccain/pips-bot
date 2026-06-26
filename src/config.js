@@ -11,6 +11,9 @@ export const config = {
   // uses Redis instead of the local data/scores.json file.
   redisUrl: process.env.UPSTASH_REDIS_REST_URL || '',
   redisToken: process.env.UPSTASH_REDIS_REST_TOKEN || '',
+  // Admin phone (E.164). When set, DATA/CLEAR only work from this number.
+  // When empty, they're open to anyone — set this in production.
+  ownerPhone: process.env.OWNER_PHONE || '',
 };
 
 export function requireApiKey() {

@@ -2,12 +2,16 @@
 import { parsePipsScores, DIFFICULTY_EMOJI } from './parse.js';
 import { buildBoard, WINDOWS, DIFFICULTIES } from './board.js';
 import { ART_OF_WAR_QUOTES } from './quotes.js';
+import { config } from './config.js';
 import {
   addScore,
   setActiveName,
   getActiveName,
   getScores,
   getScoresForName,
+  removeScore,
+  removeAllForName,
+  clearAll,
 } from './store.js';
 
 const HELP = [
@@ -89,6 +93,16 @@ export async function handleMessage(phone, text) {
     case 'standings':
     case 'scores':
       return renderBoard(parseFilters(rest, true));
+
+    case 'data':
+      if (!isOwner(phone)) return ADMIN_ONLY;
+      if (!arg) return 'Usage: DATA <name>';
+      return renderData(arg);
+
+    case 'clear':
+      if (!isOwner(phone)) return ADMIN_ONLY;
+      if (!arg) return 'Usage: CLEAR <id> | CLEAR <name> | CLEAR ALL';
+      return handleClear(arg, rest);
   }
 
   // 3) Bare board shortcuts: "WEEK", "EASY", "HARD ALLTIME", "TODAY"...
@@ -197,6 +211,76 @@ async function renderMyScores(phone) {
 function randomWarQuote() {
   const q = ART_OF_WAR_QUOTES[Math.floor(Math.random() * ART_OF_WAR_QUOTES.length)];
   return `"${q}"\n— Sun Tzu`;
+}
+
+// ---- Admin: DATA / CLEAR ----
+
+const ADMIN_ONLY = "That's an admin-only command.";
+
+function normalizePhone(p) {
+  return String(p || '').replace(/\D/g, '');
+}
+
+function isOwner(phone) {
+  if (!config.ownerPhone) return true; // not configured → open (set OWNER_PHONE in prod)
+  return normalizePhone(phone) === normalizePhone(config.ownerPhone);
+}
+
+// Stable short id for a record, derived from its identity (no schema change).
+function recordId(name, puzzle, difficulty) {
+  const str = `${name}|${puzzle}|${difficulty}`;
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = ((h * 33) ^ str.charCodeAt(i)) >>> 0;
+  return h.toString(36).padStart(5, '0').slice(0, 5);
+}
+
+async function renderData(name) {
+  const mine = await getScoresForName(name);
+  if (mine.length === 0) return `No data for "${name}".`;
+
+  const rows = mine
+    .slice()
+    .sort((a, b) => b.puzzle - a.puzzle)
+    .map((s) => {
+      const id = recordId(s.name, s.puzzle, s.difficulty);
+      const emoji = DIFFICULTY_EMOJI[s.difficulty] || '';
+      return `[${id}] #${s.puzzle} ${s.difficulty} ${emoji} ${s.timeStr}`;
+    });
+
+  return [
+    `Data for "${name}" (${mine.length}):`,
+    ...rows,
+    '',
+    `CLEAR <id> to delete one, or CLEAR ${name} for all.`,
+  ].join('\n');
+}
+
+async function handleClear(arg, rest) {
+  const upper = arg.toUpperCase();
+
+  if (upper === 'ALL') {
+    return 'This wipes ALL scores. Reply "CLEAR ALL CONFIRM" to proceed.';
+  }
+  if (upper === 'ALL CONFIRM') {
+    await clearAll();
+    return '🧹 Cleared the entire leaderboard.';
+  }
+
+  // Single token that matches a record id → delete that one record.
+  if (rest.length === 1) {
+    const token = rest[0].toLowerCase();
+    const scores = await getScores();
+    const match = scores.find((s) => recordId(s.name, s.puzzle, s.difficulty) === token);
+    if (match) {
+      await removeScore({ name: match.name, puzzle: match.puzzle, difficulty: match.difficulty });
+      return `🧹 Cleared [${token}] ${match.name} #${match.puzzle} ${match.difficulty} ${match.timeStr}.`;
+    }
+  }
+
+  // Otherwise treat the whole arg as a name.
+  const removed = await removeAllForName(arg);
+  if (removed === 0) return `Nothing to clear for "${arg}" (no matching id or name).`;
+  return `🧹 Cleared ${removed} record${removed === 1 ? '' : 's'} for "${arg}".`;
 }
 
 function clampName(name) {

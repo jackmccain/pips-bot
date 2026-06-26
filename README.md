@@ -40,6 +40,17 @@ phone can do `NAME Jack` → score → `NAME Nick` → score, and Jack and Nick 
 as separate players. Within a window, each player is ranked by their fastest time
 (the `(#N)` shows which puzzle).
 
+### Admin commands (owner only)
+
+Restricted to `OWNER_PHONE` (when set). Used to inspect and clean up the DB remotely:
+
+| Text this        | Bot does                                              |
+| ---------------- | ----------------------------------------------------- |
+| `DATA <name>`    | list every record for a name, each with a short `[id]` |
+| `CLEAR <id>`     | delete one record by its `[id]` (from `DATA`)          |
+| `CLEAR <name>`   | delete all records for a name                          |
+| `CLEAR ALL`      | wipe everything (asks for `CLEAR ALL CONFIRM`)         |
+
 <!-- Hidden easter eggs: TIPS (a "winning strategy") and WAR (a random Sun Tzu quote). -->
 <!-- Time windows are filtered by submission time (UTC day boundaries). -->
 
@@ -93,6 +104,7 @@ local file. (Locally, with no Upstash vars set, it still uses `data/scores.json`
    prompted, fill in the secret env vars:
    - `LINQ_API_KEY`
    - `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`
+   - `OWNER_PHONE` (your number in E.164, e.g. `+15551234567`) so DATA/CLEAR are admin-only
    - (`LINQ_FROM_NUMBER` is already set in the blueprint)
 
 4. **Point the webhook at Render** — once you have the live URL

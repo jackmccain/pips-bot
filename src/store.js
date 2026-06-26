@@ -149,3 +149,39 @@ export function getScoresForName(name) {
     return db.scores.filter((s) => s.name === name);
   });
 }
+
+/** Remove the single best-record for name+puzzle+difficulty. Returns count removed. */
+export function removeScore({ name, puzzle, difficulty }) {
+  return withLock(async () => {
+    const db = await load();
+    const before = db.scores.length;
+    db.scores = db.scores.filter(
+      (s) => !(s.name === name && s.puzzle === puzzle && s.difficulty === difficulty)
+    );
+    const removed = before - db.scores.length;
+    if (removed) await save(db);
+    return removed;
+  });
+}
+
+/** Remove all scores for a name (and any personas pointing at it). Returns count removed. */
+export function removeAllForName(name) {
+  return withLock(async () => {
+    const db = await load();
+    const before = db.scores.length;
+    db.scores = db.scores.filter((s) => s.name !== name);
+    for (const [phone, n] of Object.entries(db.active)) {
+      if (n === name) delete db.active[phone];
+    }
+    const removed = before - db.scores.length;
+    await save(db);
+    return removed;
+  });
+}
+
+/** Wipe everything. */
+export function clearAll() {
+  return withLock(async () => {
+    await save({ active: {}, scores: [] });
+  });
+}

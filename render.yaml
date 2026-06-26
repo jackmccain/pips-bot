@@ -22,3 +22,6 @@ services:
         sync: false
       - key: UPSTASH_REDIS_REST_TOKEN
         sync: false
+      # Admin phone for DATA/CLEAR commands (E.164). Set in the dashboard.
+      - key: OWNER_PHONE
+        sync: false
