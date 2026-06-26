@@ -1,0 +1,23 @@
+{
+  "name": "pips-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Group leaderboard bot for NYT Pips scores, over text via the Linq Partner API.",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "numbers": "node scripts/list-numbers.js",
+    "register-webhook": "node scripts/register-webhook.js",
+    "send-test": "node scripts/send-test.js",
+    "test:parse": "node scripts/test-parse.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

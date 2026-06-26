@@ -1,0 +1,24 @@
+# Render Blueprint — deploys pips-bot as a free web service.
+# In the Render dashboard: New + → Blueprint → connect this repo.
+# Secrets (sync: false) are entered in the dashboard, not committed here.
+services:
+  - type: web
+    name: pips-bot
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: LINQ_FROM_NUMBER
+        value: "+16504336715"
+      - key: LINQ_API_KEY
+        sync: false
+      - key: LINQ_WEBHOOK_SECRET
+        sync: false
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
