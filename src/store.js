@@ -1,12 +1,15 @@
-// Persistence for scores + names.
+// Persistence for scores + the active "persona" name per phone.
+//
+// Identity is NAME-based, not phone-based: a phone sets its active name with
+// NAME, and every score is attributed to whatever name was active when it was
+// sent. Switching names does not move old scores. Several people can therefore
+// share one phone and each keep their own scores.
 //
 // Two backends, chosen automatically:
-//   • Upstash Redis (when UPSTASH_REDIS_REST_* are set) — survives restarts on
-//     ephemeral hosts like Render free. The whole DB is one JSON blob.
+//   • Upstash Redis (when UPSTASH_REDIS_REST_* are set) — survives restarts.
 //   • Local JSON file (data/scores.json) — for local development.
 //
-// All functions are async. A small in-process lock serializes read-modify-write
-// so concurrent webhooks can't clobber each other (Render free = single instance).
+// All functions are async. A small in-process lock serializes read-modify-write.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,13 +20,12 @@ const DATA_FILE = path.join(__dirname, '..', 'data', 'scores.json');
 const REDIS_KEY = 'pips-bot:db';
 
 const useRedis = Boolean(config.redisUrl && config.redisToken);
-const empty = () => ({ names: {}, scores: [] });
+const empty = () => ({ active: {}, scores: [] });
 
 export function backendName() {
   return useRedis ? 'upstash-redis' : 'local-file';
 }
 
-// --- Upstash Redis REST: POST a command as a JSON array, get { result }. ---
 async function redisCommand(cmd) {
   const res = await fetch(config.redisUrl, {
     method: 'POST',
@@ -39,18 +41,25 @@ async function redisCommand(cmd) {
   return (await res.json()).result;
 }
 
+function normalize(db) {
+  if (!db || typeof db !== 'object') return empty();
+  db.active ||= {};
+  db.scores ||= [];
+  return db;
+}
+
 async function load() {
   if (useRedis) {
     const raw = await redisCommand(['GET', REDIS_KEY]);
     if (!raw) return empty();
     try {
-      return JSON.parse(raw);
+      return normalize(JSON.parse(raw));
     } catch {
       return empty();
     }
   }
   try {
-    return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+    return normalize(JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')));
   } catch {
     return empty();
   }
@@ -76,41 +85,37 @@ function withLock(fn) {
   return run;
 }
 
-function maskNumber(phone) {
-  const digits = String(phone).replace(/\D/g, '');
-  return digits.length >= 4 ? `...${digits.slice(-4)}` : phone;
-}
-
-/** Set a player's display name (keyed by phone number). */
-export function setName(phone, name) {
+/** Set the active persona for a phone. */
+export function setActiveName(phone, name) {
   return withLock(async () => {
     const db = await load();
-    db.names[phone] = name;
+    db.active[phone] = name;
     await save(db);
   });
 }
 
-/** Display name for a phone, falling back to a masked number. */
-export function getName(phone) {
+/** The active persona for a phone, or null if none chosen yet. */
+export function getActiveName(phone) {
   return withLock(async () => {
     const db = await load();
-    return db.names[phone] || maskNumber(phone);
+    return db.active[phone] || null;
   });
 }
 
 /**
- * Record a score. One best (fastest) time is kept per phone+puzzle+difficulty.
+ * Record a score under a name. One best (fastest) time is kept per
+ * name+puzzle+difficulty.
  * @returns {Promise<{added:boolean, improved:boolean, previous?:number}>}
  */
-export function addScore({ phone, puzzle, difficulty, seconds, timeStr }) {
+export function addScore({ phone, name, puzzle, difficulty, seconds, timeStr }) {
   return withLock(async () => {
     const db = await load();
     const existing = db.scores.find(
-      (s) => s.phone === phone && s.puzzle === puzzle && s.difficulty === difficulty
+      (s) => s.name === name && s.puzzle === puzzle && s.difficulty === difficulty
     );
 
     if (!existing) {
-      db.scores.push({ phone, puzzle, difficulty, seconds, timeStr, at: new Date().toISOString() });
+      db.scores.push({ name, phone, puzzle, difficulty, seconds, timeStr, at: new Date().toISOString() });
       await save(db);
       return { added: true, improved: false };
     }
@@ -119,6 +124,7 @@ export function addScore({ phone, puzzle, difficulty, seconds, timeStr }) {
       const previous = existing.seconds;
       existing.seconds = seconds;
       existing.timeStr = timeStr;
+      existing.phone = phone;
       existing.at = new Date().toISOString();
       await save(db);
       return { added: false, improved: true, previous };
@@ -128,44 +134,18 @@ export function addScore({ phone, puzzle, difficulty, seconds, timeStr }) {
   });
 }
 
-/** The most recent (highest) puzzle number anyone has logged, or null. */
-export function latestPuzzle() {
+/** All score records (a shallow copy). */
+export function getScores() {
   return withLock(async () => {
     const db = await load();
-    if (db.scores.length === 0) return null;
-    return Math.max(...db.scores.map((s) => s.puzzle));
+    return db.scores.slice();
   });
 }
 
-/**
- * Standings for one puzzle: { Easy: [...], Medium: [...], Hard: [...] }
- * Each entry: { phone, name, seconds, timeStr }, sorted fastest first.
- */
-export function leaderboard(puzzle) {
+/** All scores logged under a given name. */
+export function getScoresForName(name) {
   return withLock(async () => {
     const db = await load();
-    const byDifficulty = { Easy: [], Medium: [], Hard: [] };
-    for (const s of db.scores) {
-      if (s.puzzle !== puzzle) continue;
-      if (!byDifficulty[s.difficulty]) continue;
-      byDifficulty[s.difficulty].push({
-        phone: s.phone,
-        name: db.names[s.phone] || maskNumber(s.phone),
-        seconds: s.seconds,
-        timeStr: s.timeStr,
-      });
-    }
-    for (const d of Object.keys(byDifficulty)) {
-      byDifficulty[d].sort((a, b) => a.seconds - b.seconds);
-    }
-    return byDifficulty;
-  });
-}
-
-/** All scores for one player, most recent puzzle first. */
-export function scoresForPhone(phone) {
-  return withLock(async () => {
-    const db = await load();
-    return db.scores.filter((s) => s.phone === phone).sort((a, b) => b.puzzle - a.puzzle);
+    return db.scores.filter((s) => s.name === name);
   });
 }

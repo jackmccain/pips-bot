@@ -23,13 +23,26 @@ Bot → Thanks Jack! Pips #3
 
 ## Commands
 
-| Text this   | Bot does                          |
-| ----------- | --------------------------------- |
-| _(a result)_ | logs your score + shows standings |
-| `BOARD`     | today's standings                 |
-| `ME`        | your scores                       |
-| `NAME Jack` | set your display name             |
-| `INIT`      | list commands                     |
+| Text this              | Bot does                                                   |
+| ---------------------- | ---------------------------------------------------------- |
+| _(a result)_           | logs your score (under your active name) + shows standings |
+| `BOARD`                | today's standings (all difficulties)                       |
+| `BOARD EASY`           | filter to one difficulty (`EASY` / `MEDIUM` / `HARD`)      |
+| `BOARD WEEK`           | longer window (`WEEK` / `MONTH` / `YEAR` / `ALLTIME`)      |
+| `BOARD HARD WEEK`      | combine difficulty + window                                |
+| `ME`                   | your scores (for your active name)                         |
+| `NAME Jack`            | log under a name — switch anytime, scores don't carry over |
+| `INIT`                 | list commands                                              |
+
+**Identity is name-based:** `NAME` sets the *active persona* for your phone, and
+each result is filed under whatever name was active when you sent it. So one
+phone can do `NAME Jack` → score → `NAME Nick` → score, and Jack and Nick appear
+as separate players. Within a window, each player is ranked by their fastest time
+(the `(#N)` shows which puzzle).
+
+<!-- Hidden easter eggs: TIPS (a "winning strategy") and WAR (a random Sun Tzu quote). -->
+<!-- Time windows are filtered by submission time (UTC day boundaries). -->
+
 
 ## Setup
 

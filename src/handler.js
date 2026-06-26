@@ -1,25 +1,46 @@
 // Turns an inbound text into a reply string. Pure logic — no network here.
 import { parsePipsScores, DIFFICULTY_EMOJI } from './parse.js';
+import { buildBoard, WINDOWS, DIFFICULTIES } from './board.js';
+import { ART_OF_WAR_QUOTES } from './quotes.js';
 import {
   addScore,
-  setName,
-  getName,
-  leaderboard,
-  latestPuzzle,
-  scoresForPhone,
+  setActiveName,
+  getActiveName,
+  getScores,
+  getScoresForName,
 } from './store.js';
 
-const DIFFICULTY_ORDER = ['Easy', 'Medium', 'Hard'];
-
 const HELP = [
-  'Pips bot 🎲 — text me your NYT Pips results and I\'ll keep the leaderboard.',
+  "Pips bot 🎲 — text your NYT Pips results and I'll keep the leaderboard.",
   '',
   'Commands:',
   '• BOARD — today\'s standings',
+  '   add EASY / MEDIUM / HARD to filter difficulty',
+  '   add WEEK / MONTH / YEAR / ALLTIME for longer windows',
+  '   (e.g. BOARD HARD WEEK)',
   '• ME — your scores',
-  '• NAME <your name> — set how you show up',
+  '• NAME <your name> — log under a name (switch anytime)',
   '• INIT — this message',
 ].join('\n');
+
+const TIPS_REPLY = [
+  '🧠 Winning strategy: consider the Hans Niemann strategy. 👀',
+  'https://www.cbssports.com/general/news/chess-sex-toy-cheating-scandal-explained-world-no-1-magnus-carlsen-hans-niemann-in-wild-sports-controversy/',
+].join('\n');
+
+// Word → canonical difficulty / window, for parsing BOARD filters.
+const DIFF_WORDS = {
+  easy: 'Easy', e: 'Easy',
+  medium: 'Medium', med: 'Medium', m: 'Medium',
+  hard: 'Hard', h: 'Hard',
+};
+const WINDOW_WORDS = {
+  today: 'today', day: 'today',
+  week: 'week', w: 'week',
+  month: 'month', mo: 'month',
+  year: 'year', y: 'year',
+  alltime: 'alltime', all: 'alltime', 'all-time': 'alltime', lifetime: 'alltime',
+};
 
 /**
  * @param {string} phone  sender handle (E.164)
@@ -34,24 +55,18 @@ export async function handleMessage(phone, text) {
   const scores = parsePipsScores(body);
   if (scores.length > 0) return handleScores(phone, scores);
 
-  // 2) Otherwise, a command. Match on the first word.
-  const [word, ...rest] = body.split(/\s+/);
-  const cmd = word.toLowerCase();
+  const words = body.split(/\s+/);
+  const cmd = words[0].toLowerCase();
+  const rest = words.slice(1);
   const arg = rest.join(' ').trim();
 
+  // 2) Fixed commands + easter eggs.
   switch (cmd) {
     case 'init':
     case 'help': // kept as a silent fallback — people reflexively text HELP
     case 'commands':
     case '?':
       return HELP;
-
-    case 'board':
-    case 'leaderboard':
-    case 'standings':
-    case 'today':
-    case 'scores':
-      return renderLeaderboard();
 
     case 'me':
     case 'mine':
@@ -60,16 +75,32 @@ export async function handleMessage(phone, text) {
 
     case 'name':
       if (!arg) return 'Usage: NAME <your name>  — e.g. NAME Jack';
-      await setName(phone, clampName(arg));
-      return `Got it — you'll show up as "${clampName(arg)}".`;
+      await setActiveName(phone, clampName(arg));
+      return `You're now logging as "${clampName(arg)}". Send your Pips results! 🎲`;
 
-    default:
-      return `Didn't catch that. Send your Pips results to log them, or text INIT for commands.`;
+    case 'tips':
+      return TIPS_REPLY;
+
+    case 'war':
+      return randomWarQuote();
+
+    case 'board':
+    case 'leaderboard':
+    case 'standings':
+    case 'scores':
+      return renderBoard(parseFilters(rest, true));
   }
+
+  // 3) Bare board shortcuts: "WEEK", "EASY", "HARD ALLTIME", "TODAY"...
+  const q = parseFilters(words, false);
+  if (q) return renderBoard(q);
+
+  // 4) Fallback.
+  return "Didn't catch that. Send your Pips results to log them, or text INIT for commands.";
 }
 
 async function handleScores(phone, scores) {
-  const name = await getName(phone);
+  const name = (await getActiveName(phone)) || maskNumber(phone);
   const lines = [];
   let puzzle = null;
 
@@ -77,6 +108,7 @@ async function handleScores(phone, scores) {
     puzzle = s.puzzle;
     const res = await addScore({
       phone,
+      name,
       puzzle: s.puzzle,
       difficulty: s.difficulty,
       seconds: s.seconds,
@@ -93,46 +125,87 @@ async function handleScores(phone, scores) {
   }
 
   const header = `Thanks ${name}! Pips #${puzzle}`;
-  const board = await renderLeaderboard(puzzle);
+  const board = await renderBoard({ difficulty: null, window: 'today' });
   return [header, ...lines, '', board].join('\n');
 }
 
-async function renderLeaderboard(puzzle) {
-  const p = puzzle ?? (await latestPuzzle());
-  if (p == null) return 'No scores yet. Be the first — text me your Pips results!';
+/**
+ * Parse difficulty/window filter words.
+ * @param {string[]} words
+ * @param {boolean} lenient  if true (explicit BOARD cmd), ignore unknown words;
+ *                           if false (bare shortcut), return null on any unknown.
+ * @returns {{difficulty:string|null, window:string}|null}
+ */
+function parseFilters(words, lenient) {
+  let difficulty = null;
+  let window = null;
+  let unknown = false;
 
-  const board = await leaderboard(p);
-  const out = [`🏆 Pips #${p} standings`];
+  for (const w of words) {
+    const lw = w.toLowerCase();
+    if (DIFF_WORDS[lw]) difficulty = DIFF_WORDS[lw];
+    else if (WINDOW_WORDS[lw]) window = WINDOW_WORDS[lw];
+    else unknown = true;
+  }
+
+  if (!lenient) {
+    if (words.length === 0 || unknown) return null;
+  }
+  return { difficulty, window: window || 'today' };
+}
+
+async function renderBoard({ difficulty, window }) {
+  const scores = await getScores();
+  const board = buildBoard(scores, { difficulty, window, now: new Date() });
+  const win = WINDOWS[window] || WINDOWS.today;
+
+  const title = `🏆 Pips Board — ${difficulty ? `${difficulty} — ` : ''}${win.label}`;
+  const out = [title];
+  const diffs = difficulty ? [difficulty] : DIFFICULTIES;
   let any = false;
 
-  for (const d of DIFFICULTY_ORDER) {
+  for (const d of diffs) {
     const rows = board[d];
     if (!rows || rows.length === 0) continue;
     any = true;
     out.push(`${DIFFICULTY_EMOJI[d]} ${d}`);
-    rows.forEach((r, i) => out.push(`${i + 1}. ${r.name} ${r.timeStr}`));
+    rows.forEach((r, i) => out.push(`${i + 1}. ${r.name} ${r.timeStr} (#${r.puzzle})`));
   }
 
-  if (!any) return `No scores yet for Pips #${p}.`;
+  if (!any) {
+    return `No scores yet for ${win.label}${difficulty ? ` ${difficulty}` : ''}. Send me your Pips results!`;
+  }
   return out.join('\n');
 }
 
 async function renderMyScores(phone) {
-  const mine = await scoresForPhone(phone);
-  if (mine.length === 0) return 'I have no scores for you yet. Send me your Pips results!';
+  const name = (await getActiveName(phone)) || maskNumber(phone);
+  const mine = await getScoresForName(name);
+  if (mine.length === 0) {
+    return `I have no scores for "${name}" yet. Send me your Pips results!`;
+  }
 
-  const name = await getName(phone);
-  const recentPuzzle = mine[0].puzzle;
+  const recentPuzzle = Math.max(...mine.map((s) => s.puzzle));
   const out = [`${name} — Pips #${recentPuzzle}`];
-  for (const d of DIFFICULTY_ORDER) {
+  for (const d of DIFFICULTIES) {
     const row = mine.find((s) => s.puzzle === recentPuzzle && s.difficulty === d);
     if (row) out.push(`${DIFFICULTY_EMOJI[d]} ${d} ${row.timeStr}`);
   }
   return out.join('\n');
 }
 
+function randomWarQuote() {
+  const q = ART_OF_WAR_QUOTES[Math.floor(Math.random() * ART_OF_WAR_QUOTES.length)];
+  return `"${q}"\n— Sun Tzu`;
+}
+
 function clampName(name) {
   return name.replace(/\s+/g, ' ').slice(0, 24);
+}
+
+function maskNumber(phone) {
+  const digits = String(phone).replace(/\D/g, '');
+  return digits.length >= 4 ? `...${digits.slice(-4)}` : phone;
 }
 
 function formatSecs(seconds) {
